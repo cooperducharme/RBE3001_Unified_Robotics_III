@@ -1,0 +1,454 @@
+classdef Robot < handle
+    
+    properties
+        myHIDSimplePacketComs;
+        pol; 
+        GRIPPER_ID = 1962;
+        %Included Constants for Jack's Functions
+        %Motor Setpoint
+        SERVO_READ_POS = 1910;
+        %Motor Velocity
+        SERVO_READ_VEL = 1822;
+        %Target Position ID
+        SERVO_ID = 1848;
+        %Global for my setpoints
+        setpoints = [0 0 0];
+    end
+    
+    methods
+        
+        %The is a shutdown function to clear the HID hardware connection
+        function  shutdown(packet)
+	    %Close the device
+            packet.myHIDSimplePacketComs.disconnect();
+        end
+        
+        % Create a packet processor for an HID device with USB PID 0x007
+        function packet = Robot(dev)
+             packet.myHIDSimplePacketComs=dev; 
+            packet.pol = java.lang.Boolean(false);
+        end
+        
+        %Perform a command cycle. This function will take in a command ID
+        %and a list of 32 bit floating point numbers and pass them over the
+        %HID interface to the device, it will take the response and parse
+        %them back into a list of 32 bit floating point numbers as well
+        function com = command(packet, idOfCommand, values)
+                com= zeros(15, 1, 'single');
+                try
+                    ds = javaArray('java.lang.Double',length(values));
+                    for i=1:length(values)
+                        ds(i)= java.lang.Double(values(i));
+                    end
+                    % Default packet size for HID
+                    intid = java.lang.Integer(idOfCommand);
+                    packet.myHIDSimplePacketComs.writeFloats(intid,  ds);
+                    ret = 	packet.myHIDSimplePacketComs.readFloats(intid) ;
+                    for i=1:length(com)
+                       com(i)= ret(i).floatValue();
+                    end
+                catch exception
+                    getReport(exception)
+                    disp('Command error, reading too fast');
+                end
+        end
+        
+        function com = read(packet, idOfCommand)
+                com= zeros(15, 1, 'single');
+                try
+
+                    % Default packet size for HID
+                    intid = java.lang.Integer(idOfCommand);
+                    ret = 	packet.myHIDSimplePacketComs.readFloats(intid) ;
+                    for i=1:length(com)
+                       com(i)= ret(i).floatValue();
+                    end
+                catch exception
+                  getReport(exception)
+                    disp('Command error, reading too fast');
+                end
+        end
+        
+        function  write(packet, idOfCommand, values)
+                try
+                    ds = javaArray('java.lang.Double',length(values));
+                    for i=1:length(values)
+                        ds(i)= java.lang.Double(values(i));
+                    end
+                    % Default packet size for HID
+                    intid = java.lang.Integer(idOfCommand);
+                    packet.myHIDSimplePacketComs.writeFloats(intid,  ds,packet.pol);
+
+                catch exception
+                    getReport(exception)
+                    disp('Command error, reading too fast');
+                end
+        end
+        
+        %-------------Lab Functions Additions For Lab 1--------------------
+        
+        %Measured_js() Function:
+        %This function will take two Boolean values named GETPOS and GETVEL
+        %and returns a 2x3 array. This array will contain the current 
+        %joint positions in degrees in the first row and current joint 
+        %velocities in the second row
+        function ret = measured_js(packet, GETPOS, GETVEL)
+            try
+               ret = [0 0 0; 0 0 0];
+               if GETPOS
+                   pos = packet.read(packet.SERVO_READ_POS);
+                   ret(1,1) = pos(3);
+                   ret(1,2) = pos(5);
+                   ret(1,3) = pos(7);
+               end
+               if GETVEL
+                   vel = packet.read(packet.SERVO_READ_VEL);
+                   ret(2,1) = vel(3);
+                   ret(2,2) = vel(6);
+                   ret(2,3) = vel(9);
+               end
+            catch exception
+                    getReport(exception)
+                    disp('Command error, reading too fast');
+            end
+        end
+        
+        %Servo_jp() Function:
+        %This function will take a 1x3 array of command joint values in 
+        %degrees and send them to the actuators
+        function  packet_2 = servo_jp(packet, joint_Vals)
+                try
+                   packet.setpoints = joint_Vals;
+                   packet_2 = zeros(15, 1, 'single');
+                   packet_2(1) = 1000; %time in ms
+                   packet_2(2) = 0; %linear interpolation
+                   packet_2(3) = joint_Vals(1); % First val of array; motor 1
+                   packet_2(4) = joint_Vals(2); % Second val of array; motor 2
+                   packet_2(5) = joint_Vals(3); % Third val of array; motor 3
+               
+                   %Writes to the microcontroller packet_2 and the desired 
+                   %motor values
+                   packet.write(packet.SERVO_ID, packet_2); 
+                   
+                catch exception
+                    getReport(exception)
+                    disp('Command error, reading too fast');
+                end
+        end
+        
+        %goal_js()
+        %This function returns the end setpoints stored in the robot object
+        function ret = goal_js(packet)
+            ret = packet.setpoints;
+        end
+        
+        
+        %interpolate_jp
+        %takes a 1x3 array of joint values and an interpolation time in ms
+        %to get there
+        function interpolate_jp(packet, joint_Vals, intp)
+                try
+                   packet.setpoints = joint_Vals;
+                   packet_2 = zeros(15, 1, 'single');
+                  
+                   define_intp = intp;
+                   
+                   packet_2(1) = define_intp; %one second time
+                   packet_2(2) = 0; %linear interpolation; 1 = sine
+                   packet_2(3) = joint_Vals(1); % First val of array; motor 1
+                   packet_2(4) = joint_Vals(2); % Second val of array; motor 2
+                   packet_2(5) = joint_Vals(3); % Third val of array; motor 3
+               
+                   %Writes to the microcontroller packet_2 and the desired 
+                   %motor values
+                   packet.write(packet.SERVO_ID, packet_2); 
+                   
+                catch exception
+                    getReport(exception)
+                    disp('Command error, reading too fast');
+                end
+        end
+        
+        %Setpoint_js Function:
+        %Which  returns  a  1x3  array thatcontains  current  joint  set  
+        %point  positions  in  degrees.If interpolation  is  being  used  
+        %and  you  request  this  during  motion,  it  will  return  the  
+        %current intermediate set point. 
+        function  joint_Vals = setpoint_js(packet)
+                try
+                   %Creates the 1 x 3 array of cmmd joint values
+                   joint_Vals = [0, 0, 0];
+                   packet_2 = packet.read(packet.SERVO_READ_POS);
+                   joint_Vals(1) = packet_2(3); % First val of array; motor 1
+                   joint_Vals(2) = packet_2(4); % Second val of array; motor 2
+                   joint_Vals(3) = packet_2(5); % Third val of array; motor 3
+               
+                catch exception
+                    getReport(exception)
+                    disp('Command error, reading too fast');
+                end
+        end
+        
+        %------------------------------------------------------------------
+        %-------------Lab Functions Additions For Lab 2--------------------
+        %------------------------------------------------------------------      
+        %fk3001 consumes joint parameters and returns the
+        %resulting 4x4 HTM
+        function T_Base_Tip = fk3001(obj, jointAngles)
+            
+           %Lengths of Robot arm
+           L1 = 95;
+           L2 = 100;
+           L3 = 100;
+            
+           %Parameters derived from first half of part 1
+           dh_parameters = [0 L1 0 -90; 
+                           -90 0 L2 0; 
+                            90 0 L3  0];
+           
+           T_Base_Tip = eye(4);
+           for i = 1:size(jointAngles,2)
+               
+               dh_parameter2 = [jointAngles(i) 0 0 0];
+               
+               if i < size(dh_parameters,2)
+                   dh_parameter2 = dh_parameter2 + dh_parameters(i,:);
+               end
+               T_Base_Tip = T_Base_Tip * obj.dh2mat(dh_parameter2);
+           end
+        end
+        
+        %dh2mat consumes a row of dh parameters and returns a 4x4
+        %intermediate transformation matrix along the current link
+        function transformation_Matrix = dh2mat(obj, dh_parameter)
+            transformation_Matrix = [cosd(dh_parameter(1)), -sind(dh_parameter(1))*cosd(dh_parameter(4)),       sind(dh_parameter(1))*sind(dh_parameter(4)), (dh_parameter(3))*cosd(dh_parameter(1));
+                                  sind(dh_parameter(1)),  cosd(dh_parameter(1))*cosd(dh_parameter(4)), -cosd(dh_parameter(1))*sind(dh_parameter(4)), (dh_parameter(3))*sind(dh_parameter(1));
+                                  0,                      sind(dh_parameter(4)),                        cosd(dh_parameter(4)),                  (dh_parameter(2));
+                                  0,                      0,                                            0,                                       1];
+
+        end
+
+        %dh2mat takes an nx4 array corresponding to the n rows of a full dh
+        %table and calculates the final resulting EE Transformation Matrix
+        function T = dh2fk(packet, n)
+            T = eye(4);
+            for j=1:4
+                T = T * packet.dh2mat(n(j,:));
+            end 
+        end
+        
+        %setpoint_cp function
+        %takes data from setpoint_js() and returns a 4x4
+        %homogenous transformation matrix based upon the current joint
+        %positions in degrees
+        function T = setpoint_cp(packet)
+            T = packet.fk3001(packet.setpoint_js());
+        end
+      
+        %measured_cp takes data from measure_js (joint vars) 
+        %and injects them into fk3001 to recieve a transformation matrix 
+        %created that gives the position of the EE given the angles
+        function T_base_tip = measured_cp(obj)
+           jnt_setpoint = obj.measured_js(1, 0);
+           jnt_angles = jnt_setpoint(1,:);
+           T_base_tip = obj.fk3001(jnt_angles);
+        end
+       
+
+        %goal_cp function takes goal_js in the form of n joint configuration 
+        %(3 values in degrees) as a parameter and uses fk3001 with
+        %inputs of n joint positions(again 3values in degrees)
+         function packet_HTM = goal_cp(obj)     
+            packet_HTM = obj.fk3001(obj.goal_js());            
+         end
+         
+                %------------------------------------------------------------------
+        %-------------Lab Functions Additions For Lab 3--------------------
+        %------------------------------------------------------------------  
+        function angles = ik3001(obj, positions)
+            %This will verify if the opositions being injected follow the
+            %workspace boundaries:
+            
+            workspace_boundaries = [0 150; -150 150; 0 300];
+            
+            if(~(positions(1) >= workspace_boundaries(1,1) || positions(1) <= workspace_boundaries(1,2) && ...
+                 positions(2) >= workspace_boundaries(2,1) || positions(2) <= workspace_boundaries(2,2) && ...
+                 positions(3) >= workspace_boundaries(3,1) || positions(3) <= workspace_boundaries(3,2)))
+                    error("Error, the workspace boundaries are breached by the current points."); 
+            end
+                
+            Pwx = positions(1);
+            Pwy = positions(2);
+            Pwz = positions(3);
+
+            L1 = 95;
+            L2 = 100;
+            L3 = 100;
+
+            %----------------------Q1 Calculation work-----------------------------
+            %q1 was simple to calculate but q2 and q3 rely on the law of cosines
+            q1 =  round(atan2d(Pwy,Pwx)); 
+
+            %--------------------Q2 & Q3 Variable Primer---------------------------
+            %These values (d, b, A) will be utilized for the calculation of alpha 
+            %2 and beta 2 for the resulting q1 value as well as q3:
+
+            %d is for the perpendicular distance between the end effector
+            %and the xy plane.
+            d = Pwz - L1;
+
+            %b is the vertical distance from the origin to the end effector on the
+            %xy plane.
+            b = round(sqrt(Pwx^2 + Pwy^2)); 
+
+            %A is the direct length from the origin to the end effector on the xy
+            %plane.
+            A = round(sqrt(b^2 + d^2));
+
+            %Beta_2 is the angle between A and the xy plane
+            beta_2 = atan2d(d,b); 
+
+            %--------------------Q2 Law of cosine work----------------------------
+            %The three functions below get us to our atan2 transform seen with the
+            %assignment of alpha_2
+            cos_alpha_2 = ((A^2 + L2^2 - L3^2)/(2*A*L2)); 
+            sin_alpha_2 =  sqrt(1-cos_alpha_2^2); 
+
+            %The angle from L2 to A
+            alpha_2 = atan2d(sin_alpha_2,cos_alpha_2); 
+            q2 = round(90-(alpha_2+beta_2)); 
+
+            %--------------------Q3 Law of cosine work----------------------------
+            %The three functions below get us to our atan2 transform seen with the
+            %assignment of alpha_2
+            cos_alpha_3 = ((L3^2 + L2^2 - A^2)/(2*L3*L2));
+            sin_alpha_3 = sqrt(1-cos_alpha_3^2); 
+
+            %The angle from L2 to L3
+            alpha_3 = atan2d(sin_alpha_3,cos_alpha_3); 
+
+            q3 = round(90 - alpha_3);
+            
+            angle_boundaries = [-90 90; -5 100; -85 60];
+
+             if(~(q1 >= angle_boundaries(1,1) || q1 <= angle_boundaries(1,2) && ...
+                q2 >= angle_boundaries(2,1) || q2 <= angle_boundaries(2,2) && ...
+                q3 >= angle_boundaries(3,1) || q3 <= angle_boundaries(3,2)))
+                    
+               error("The returned angles are not achievable on the workspace!");
+      
+
+            else
+                angles = [q1, q2, q3];
+            end
+        end
+        
+        %------------------------------------------------------------------
+        %---------------------Lab 4 Methods--------------------------------
+        %------------------------------------------------------------------
+        
+        function returnJacobian = jacob3001(obj, q)
+           
+            q1 = q(1);
+            q2 = q(2);
+            q3 = q(3);
+
+            frame_1 = [1 0 0 0;
+                       0 1 0 0;
+                       0 0 1 55;
+                       0 0 0 1];
+
+            frame_2 = [cosd(q1) 0 -sind(q1) 0;
+                       sind(q1) 0  cosd(q1) 0;
+                       0         -1  0          40;
+                       0          0  0          1];
+
+            frame_3 = [cosd(q2-90) -sind(q2-90) 0    100*cosd(q2-90);
+                       sind(q2-90)  cosd(q2-90) 0    100*sind(q2-90);
+                       0              0             1          0;
+                       0              0             0          1];
+
+            frame_4 = [cosd(q3+90) -sind(q3+90) 0    100*cosd(q3+90);
+                       sind(q3+90)  cosd(q3+90) 0    100*sind(q3+90);
+                       0              0             1          0;
+                       0              0             0          1];            
+
+            frame_04 = frame_1*frame_2*frame_3*frame_4;
+
+            lastRow =      [100*cos((pi*q1)/180)*cos((pi*(q2 - 90))/180) + 100*cos((pi*q1)/180)*cos((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) - 100*cos((pi*q1)/180)*sin((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180),
+                           100*sin((pi*q1)/180)*cos((pi*(q2 - 90))/180) + 100*sin((pi*q1)/180)*cos((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) - 100*sin((pi*q1)/180)*sin((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180),
+                           95 - 100*cos((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180) - 100*cos((pi*(q3 + 90))/180)*sin((pi*(q2 - 90))/180) - 100*sin((pi*(q2 - 90))/180)];
+
+            diffFrameQ1 =  [-100*sin((pi*q1)/180)*cos((pi*(q2 - 90))/180) - 100*sin((pi*q1)/180)*cos((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) + 100*sin((pi*q1)/180)*sin((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180), ...
+                            100*cos((pi*q1)/180)*cos((pi*(q2 - 90))/180) + 100*cos((pi*q1)/180)*cos((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) - 100*cos((pi*q1)/180)*sin((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180), ...
+                            0];
+
+            diffFrameQ2 =  [-100*cos((pi*q1)/180)*sin((pi*(q2 - 90))/180) - 100*cos((pi*q1)/180)*sin((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) - 100*cos((pi*q1)/180)*cos((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180), ...
+                           -100*sin((pi*q1)/180)*sin((pi*(q2 - 90))/180) - 100*sin((pi*q1)/180)*sin((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) - 100*sin((pi*q1)/180)*cos((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180), ...
+                           -100*sin((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180) - 100*cos((pi*(q3 + 90))/180)*cos((pi*(q2 - 90))/180) - 100*cos((pi*(q2 - 90))/180)];
+
+            diffFrameQ3 =  [-100*cos((pi*q1)/180)*cos((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180) - 100*cos((pi*q1)/180)*sin((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180), ...
+                           -100*sin((pi*q1)/180)*cos((pi*(q2 - 90))/180)*sin((pi*(q3 + 90))/180) - 100*sin((pi*q1)/180)*sin((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180), ...
+                           100*cos((pi*(q2 - 90))/180)*cos((pi*(q3 + 90))/180) + 100*sin((pi*(q3 + 90))/180)*sin((pi*(q2 - 90))/180)];
+
+            zposForFrame1 = [frame_1(1,3), frame_1(2,3), frame_1(3,3)];
+            zposForFrame2 = [frame_2(1,3), frame_2(2,3), frame_2(3,3)];
+            zposForFrame3 = [frame_3(1,3), frame_3(2,3), frame_3(3,3)];
+
+
+            returnJacobian = [diffFrameQ1(1)   diffFrameQ2(1)   diffFrameQ3(1);
+                              diffFrameQ1(2)   diffFrameQ2(2)   diffFrameQ3(2);
+                              diffFrameQ1(3)   diffFrameQ2(3)   diffFrameQ3(3);
+                            zposForFrame1(1) zposForFrame2(1) zposForFrame3(1); 
+                            zposForFrame1(2) zposForFrame2(2) zposForFrame3(2); 
+                            zposForFrame1(3) zposForFrame2(3) zposForFrame3(3)]; 
+
+            %Original Pull test for calculating the jacobian    
+            disp(returnJacobian);
+
+            test2 = [diffFrameQ1(1)   diffFrameQ2(1)   diffFrameQ3(1);
+                     diffFrameQ1(2)   diffFrameQ2(2)   diffFrameQ3(2);
+                     diffFrameQ1(3)   diffFrameQ2(3)   diffFrameQ3(3)];
+
+            disp(det(test2));
+        end
+        
+        function p_dot = fdk3001(obj, q, q_dot)
+           Jq = obj.jacob3001(q);
+           vel = q_dot';
+           p_dot = Jq * vel;
+        end
+        
+        function pos = position_cp (obj)
+           data = obj.measured_cp();
+           xVal = data(1,4);
+           yVal = data(2,4);
+           zVal = data(3,4);
+           pos = [xVal, yVal, zVal];
+        end
+       
+        % Specifies a position to the gripper
+        function writeGripper(packet, value)
+            try
+                ds = javaArray('java.lang.Byte',length(1));
+                ds(1)= java.lang.Byte(value);
+                intid = java.lang.Integer(packet.GRIPPER_ID);
+                packet.myHIDSimplePacketComs.writeBytes(intid, ds, packet.pol);
+            catch exception
+                getReport(exception)
+                disp('Command error, reading too fast');
+            end
+        end
+        
+        % Opens the gripper
+        function openGripper(packet)
+            packet.writeGripper(180);
+        end
+        
+        % Closes the gripper
+        function closeGripper(packet)
+            packet.writeGripper(0);
+        end
+        
+    end
+end

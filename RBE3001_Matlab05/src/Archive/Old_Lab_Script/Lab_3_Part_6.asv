@@ -1,0 +1,259 @@
+clear
+clear java
+clear classes;
+
+vid = hex2dec('16c0');
+pid = hex2dec('0486');
+
+disp (vid);
+disp (pid);
+
+javaaddpath ../lib/SimplePacketComsJavaFat-0.6.4.jar;
+import edu.wpi.SimplePacketComs.*;
+import edu.wpi.SimplePacketComs.device.*;
+import edu.wpi.SimplePacketComs.phy.*;
+import java.util.*;
+import org.hid4java.*;
+version -java
+myHIDSimplePacketComs=HIDfactory.get();
+myHIDSimplePacketComs.setPid(pid);
+myHIDSimplePacketComs.setVid(vid);
+myHIDSimplePacketComs.connect();
+
+pp = Robot(myHIDSimplePacketComs);
+plotter = Plot_Kinematics();
+traj = Traj_Planner();
+
+    
+try
+    %Method Constants
+    SERV_ID = 1848;            % we will be talking to server ID 1848 on
+    SERVER_ID_READ =1910;% ID of the read packet
+    DEBUG   = false;          % enables/disables debug prints 
+        
+    %Time variables:
+    syms t;
+    t;
+    %Creates 30 different times ranging by 0.1 from each consecuative time
+    time_step_inc = 0:0.1:3;
+
+    %Position variables:
+    init_X_pos = 0;
+    curr_X_pos = 0;
+    init_Y_pos = 0;
+    curr_Y_pos = 0;
+    init_Z_pos = 0;
+    curr_Z_pos = 0;
+
+    %Velocity variables:
+    init_X_vel = 0;
+    curr_X_vel = 0;
+    init_Y_vel = 0;
+    curr_Y_vel = 0;
+    init_Z_vel = 0;
+    curr_Z_vel = 0;
+    positions = [];
+    jnt_angles = [];
+
+    %Data arrays for position, velocity, and acceleration
+    position_data = [];
+    velocity_data = [];
+    acceleration_data = [];
+    angles = [];
+    angle_data = [];
+   
+    %Creating goal points of triangle:
+    goal_1 = [90 -60 25];
+    goal_2 = [20 -25 90];
+    goal_3 = [12 77 30];
+    goal = [goal_1;goal_2;goal_3;goal_1];
+    
+    
+    %Initial movement to set to zero with interpolation of three seconds
+    pp.interpolate_jp([0 0 0], 1);
+    pause(1);
+    %Creates angles from position
+    init_angles = pp.ik3001(goal_1);
+    %Goes to the first angle
+    pp.interpolate_jp(init_angles, 1);
+    pause(1);
+    
+    %For each of the goals without considering the above initial angle
+    for i=1:size(goal)-1
+        
+        %Creates the x, y, and z coefficients from quintic trajectory
+        %for the formation of their quintic polynomials
+        x_coeff = traj.linear_traj(0,3,goal(i,1),goal(i+1,1));
+        y_coeff = traj.linear_traj(0,3,goal(i,2),goal(i+1,2));
+        z_coeff = traj.linear_traj(0,3,goal(i,3),goal(i+1,3));
+
+        
+        %Linear position equations
+        x_pos = x_coeff(1) + x_coeff(2)*t + x_coeff(3)*(t^2) + ...
+            x_coeff(4)*(t^3);
+        
+        y_pos = y_coeff(1) + y_coeff(2)*t + y_coeff(3)*(t^2) + ...
+            y_coeff(4)*(t^3);
+        
+        z_pos = z_coeff(1) + z_coeff(2)*t + z_coeff(3)*(t^2) + ...
+            z_coeff(4)*(t^3);
+
+        
+        %Supstitution for the time step (in this case we have 30 steps for
+        %each position we move to. We will pass this to ik3001 for our
+        %angles.
+        X_traj_pos = subs(x_pos,t,time_step_inc);
+        Y_traj_pos = subs(y_pos,t,time_step_inc);
+        Z_traj_pos = subs(z_pos,t,time_step_inc);
+
+        
+        for j=1:30
+            %% Move Bot P1:
+            %All of these positions are derivative from the 30 positions
+            %created through the time step.
+            pass_to_ik = [X_traj_pos(j),Y_traj_pos(j),Z_traj_pos(j)];
+            
+            %% Graph One Data:
+            % ALL of this is for graphing position:
+            
+            %Get the live values measured from robot
+            pose = pp.measured_js(1,0);
+            
+            %Split the pose into 3 separate parts
+            x_pose = pose(1,1);
+            y_pose = pose(1,2);
+            z_pose = pose(1,3);
+            
+            %Store these values for later data
+            position_data = [position_data; [x_pose y_pose z_pose]];
+
+            
+            %% Graph Two Data:
+            % ALL of this is for graphing velocity:
+            
+            curr_X_pos = x_pose;
+            curr_Y_pos = y_pose;
+            curr_Z_pos = z_pose;
+
+            d_X = x_pose - init_X_pos;
+            d_Y = y_pose - init_Y_pos;
+            d_Z = z_pose - init_Z_pos;
+            
+            %Position derivitive divided by the time step for getting 
+            %velocity 
+            vel_X = d_X/0.1;
+            vel_Y = d_Y/0.1;
+            vel_Z = d_Z/0.1;
+
+            velocity_data = [velocity_data; [vel_X vel_Y vel_Z]];
+            
+            init_X_Vel = curr_X_pos;
+            init_Y_Vel = curr_Y_pos;
+            init_Z_Vel = curr_Z_pos;
+             
+            
+            
+            %% Graph Three Data:
+            % ALL of this is for graphing acceleration:
+            
+            curr_X_vel = vel_X; %Pre
+            curr_Y_vel = vel_Y;
+            curr_Z_vel = vel_Z;
+            
+            %Position derivitive divided by the time step for getting 
+            %velocity 
+            d_Vx = curr_X_vel - init_X_vel;
+            d_Vy = curr_Y_vel - init_Y_vel;
+            d_Vz = curr_Z_vel - init_Z_vel;
+
+            accel_X = d_Vx/0.1;
+            accel_Y = d_Vy/0.1;
+            accel_Z = d_Vz/0.1;
+
+            acceleration_data = [acceleration_data; [accel_X accel_Y accel_Z]];
+
+            init_X_vel = curr_X_vel;
+            init_Y_vel = curr_Y_vel;
+            init_Z_vel = curr_Z_vel;
+            
+            
+            %% Move Bot P2:
+            %After graphing is prioritized, we then adjust the bot to the
+            %proper angles for the 30 that were created through
+            %quintic_traj above.
+            angles = pp.ik3001(pass_to_ik);
+            angle_data = [angle_data; [angles(1) angles(2) angles(3)]];
+            pp.interpolate_jp(angles,0);
+                        
+        end  
+    end
+
+        %Good test case to evaluate the position.
+        %disp(position_data);
+        
+        %% Plotting:
+        % 3D Plots for ideal layout, angles in task space, and pos in task
+        % space
+
+        disp(angle_data);
+        goal_angles = [angle_data(30,1), angle_data(30,2), angle_data(30,3);
+                       angle_data(60,1), angle_data(60,2), angle_data(60,3);
+                       angle_data(90,1), angle_data(90,2), angle_data(90,3);
+                       angle_data(30,1), angle_data(30,2), angle_data(30,3)];
+         
+        % Graph of ideal layout
+        figure(1)
+        plot3(goal_angles(:,1), goal_angles(:,2), goal_angles(:,3), '-o');
+        
+        % Angles in the task space
+        figure(2)
+        plot3(angle_data(:,1), angle_data(:,2), angle_data(:,3), '-o');
+        
+        % Position in the task space
+        figure(3)
+        plot3(position_data(:,1), position_data(:,2), position_data(:,3), '-o');  
+        
+        
+        % Plotting the position, velocity, and aacceleration of the 
+        %matricies defined above. 
+        figure(4)
+        subplot (3,1,1)
+        plot(position_data(:,1))
+        hold on
+        plot(position_data(:,2))
+        hold on 
+        plot(position_data(:,3))
+        title("Position vs Time")
+        ylabel("Position (mm)");
+        xlabel("Time(s)");
+        hold off
+
+        subplot(3,1,2)
+        plot(velocity_data(:,1))
+        hold on 
+        plot(velocity_data(:,2))
+        hold on
+        plot(velocity_data(:,3))
+        title("Velocity vs Time")
+        ylabel("Velocity (mm/s)");
+        xlabel("Time(s)");
+        hold off
+
+        subplot(3,1,3)
+        plot(acceleration_data(:,1))
+        hold on 
+        plot(acceleration_data(:,2))
+        hold on 
+        plot(acceleration_data(:,3))
+        title("Acceleration vs Time")
+        ylabel("Acceleration (mm/s^2)");
+        xlabel("Time(s)");
+        hold off
+                
+catch exception
+    getReport(exception)
+    disp('Exited on error, clean shutdown');
+    myHIDSimplePacketComs.disconnect();
+end
+
+pp.shutdown()

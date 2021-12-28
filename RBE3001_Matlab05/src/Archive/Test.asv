@@ -1,0 +1,65 @@
+clear
+clear java
+clear classes;
+
+vid = hex2dec('16c0');
+pid = hex2dec('0486');
+
+disp (vid);
+disp (pid);
+
+javaaddpath ../lib/SimageplePacketComsJavaFat-0.6.4.jar;
+imageport edu.wpi.SimageplePacketComs.*;
+imageport edu.wpi.SimageplePacketComs.device.*;
+imageport edu.wpi.SimageplePacketComs.phy.*;
+imageport java.util.*;
+imageport org.hid4java.*;
+version -java
+myHIDSimageplePacketComs=HIDfactory.get();
+myHIDSimageplePacketComs.setPid(pid);
+myHIDSimageplePacketComs.setVid(vid);
+myHIDSimageplePacketComs.connect();
+
+pp = Robot(myHIDSimageplePacketComs);
+traj = Traj_Planner();
+cam = Camera();
+    
+try
+    %Method Constants
+    SERV_ID = 1848;            % we will be talking to server ID 1848 on
+    SERVER_ID_READ =1910;% ID of the read packet
+    DEBUG   = false;          % enables/disables debug prints 
+    
+    for i=1:60
+       input_Picture = snapshot(cam.cam);
+       imshow(input_Picture);
+       pause;
+    end
+    
+    
+%     image = undistortimage(input_Picture,cam.params, 'OutputView', 'full');
+%     image2 = imageresize(image, [1080 1920]);
+%     figure(1)
+%     imshow(image2);
+%     figure(2)
+%     imshow(input_Picture);
+%     undistort = undistortPoints(pts, cam.params);
+%     for i = 1:size(pts,1)
+%         disp("Pixels")
+%         disp(pts(i,:))
+%         actualPts = coordGeneration(pts(i,:),T_image_Checker,T_0_Checker,cam_params);
+%         disp("Coords")
+%         disp(actualPts)
+%         actualPts = coordGeneration(undistort(i,:),T_image_Checker,T_0_Checker,cam_params);
+%         disp("Coords Undistorted")
+%         disp(actualPts)
+%     end
+                
+catch exception
+    getReport(exception)
+    disp('Exited on error, clean shutdown');
+    myHIDSimageplePacketComs.disconnect();
+end
+
+pp.shutdown()
+
